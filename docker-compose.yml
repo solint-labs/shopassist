@@ -1,16 +1,20 @@
-# Production-shaped single-host deployment (Part 4):
-#   api (webhooks, agent/admin APIs)  ->  Redis Stream  ->  worker(s) (agent turns)
-#   + Postgres, Qdrant, Redis
+# ShopAssist: production-shaped stack on one host (Part 4).
 #
-#   cp .env.example .env              # LLM, Meta, Shopify, PII keys
-#   docker compose up --build -d
+#   api (webhooks, agent/admin APIs) ──► Redis Stream ──► worker(s) (agent turns)
+#   + Postgres, Qdrant, Redis, and (profile "tls") Caddy for automatic HTTPS.
+#
+# Local development (dependencies only, run the app from your venv):
+#   docker compose up -d postgres redis qdrant
+# Full stack on a server with HTTPS for $SHOPASSIST_DOMAIN:
+#   docker compose --profile tls up -d --build
 #   docker compose up -d --scale worker=4
-#   docker compose exec api python -m scripts.ingest --shopify
+# See docs/local-development.md and docs/deployment.md.
 x-app: &app
   build: .
+  image: shopassist:latest
   env_file: .env
   environment:
-    DATABASE_URL: postgresql+asyncpg://shopassist:shopassist@postgres:5432/shopassist
+    DATABASE_URL: postgresql+asyncpg://shopassist:${POSTGRES_PASSWORD:-shopassist}@postgres:5432/shopassist
     QDRANT_URL: http://qdrant:6333
     REDIS_URL: redis://redis:6379/0
     QUEUE_MODE: redis
@@ -26,7 +30,7 @@ x-app: &app
 services:
   api:
     <<: *app
-    ports: ["8000:8000"]
+    ports: ["127.0.0.1:8000:8000"]       # only Caddy (or your load balancer) should reach it
 
   worker:
     <<: *app
@@ -34,20 +38,45 @@ services:
     healthcheck: { disable: true }
     deploy: { replicas: 2 }
 
+  retention:                             # run daily: docker compose run --rm retention (cron / systemd timer)
+    <<: *app
+    command: ["python", "-m", "scripts.retention", "--release-idle"]
+    profiles: ["jobs"]
+    restart: "no"
+
+  caddy:
+    image: caddy:2
+    profiles: ["tls"]
+    ports: ["80:80", "443:443"]
+    environment:
+      SHOPASSIST_DOMAIN: ${SHOPASSIST_DOMAIN:-shopassist.example.com}
+      ACME_EMAIL: ${ACME_EMAIL:-ops@example.com}
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [api]
+    restart: unless-stopped
+
   postgres:
     image: postgres:16-alpine
-    environment: { POSTGRES_USER: shopassist, POSTGRES_PASSWORD: shopassist, POSTGRES_DB: shopassist }
+    environment:
+      POSTGRES_USER: shopassist
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shopassist}
+      POSTGRES_DB: shopassist
+    ports: ["127.0.0.1:5432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck: { test: ["CMD-SHELL", "pg_isready -U shopassist"], interval: 5s, retries: 10 }
 
   redis:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]   # AOF: queued messages survive restarts
+    ports: ["127.0.0.1:6379:6379"]
     volumes: [redisdata:/data]
     healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, retries: 10 }
 
   qdrant:
     image: qdrant/qdrant:latest
+    ports: ["127.0.0.1:6333:6333"]
     volumes: [qdrant:/qdrant/storage]
 
-volumes: { pgdata: {}, redisdata: {}, qdrant: {}, models: {} }
+volumes: { pgdata: {}, redisdata: {}, qdrant: {}, models: {}, caddy_data: {} }

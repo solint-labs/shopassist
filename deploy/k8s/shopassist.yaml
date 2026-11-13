@@ -9,6 +9,7 @@ kind: ConfigMap
 metadata: { name: shopassist-env }
 data:
   ENV: prod
+  PUBLIC_BASE_URL: https://shopassist.example.com   # placeholder until DNS/ingress are live
   LOG_JSON: "true"
   QUEUE_MODE: redis
   TENANTS_DIR: /config/tenants
@@ -107,3 +108,39 @@ spec:
               image: ghcr.io/your-org/shopassist:1.0.0
               command: ["python", "-m", "scripts.retention", "--release-idle"]
               envFrom: [{ configMapRef: { name: shopassist-env } }, { secretRef: { name: shopassist-secrets } }]
+---
+# Public entry point. shopassist.example.com is a PLACEHOLDER: replace it with your domain.
+# TLS via cert-manager (ClusterIssuer "letsencrypt"). Operator paths (/admin, /agent, /metrics)
+# are restricted to internal ranges; webhooks stay public.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shopassist
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: nginx
+  tls: [{ hosts: [shopassist.example.com], secretName: shopassist-tls }]
+  rules:
+    - host: shopassist.example.com
+      http:
+        paths:
+          - { path: /webhooks, pathType: Prefix, backend: { service: { name: shopassist-api, port: { number: 80 } } } }
+          - { path: /healthz, pathType: Exact, backend: { service: { name: shopassist-api, port: { number: 80 } } } }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shopassist-operator
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+    nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8,203.0.113.0/24"   # placeholder office/VPN CIDRs
+spec:
+  ingressClassName: nginx
+  tls: [{ hosts: [shopassist.example.com], secretName: shopassist-tls }]
+  rules:
+    - host: shopassist.example.com
+      http:
+        paths:
+          - { path: /admin, pathType: Prefix, backend: { service: { name: shopassist-api, port: { number: 80 } } } }
+          - { path: /agent, pathType: Prefix, backend: { service: { name: shopassist-api, port: { number: 80 } } } }

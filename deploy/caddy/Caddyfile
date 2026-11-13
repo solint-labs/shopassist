@@ -1,0 +1,19 @@
+# Caddy terminates TLS (automatic Let's Encrypt certificates) in front of the API.
+# SHOPASSIST_DOMAIN is a placeholder (shopassist.example.com) until you point real DNS here.
+{
+	email {$ACME_EMAIL}
+}
+
+{$SHOPASSIST_DOMAIN} {
+	encode gzip
+
+	# Operator APIs are only reachable from your office/VPN ranges (replace the placeholder CIDRs).
+	@operator_blocked {
+		path /admin/* /agent/* /metrics
+		not remote_ip 10.0.0.0/8 192.168.0.0/16 203.0.113.0/24
+	}
+	respond @operator_blocked 403
+
+	# Everything else: Meta + Shopify webhooks, health checks, and the allowed operator calls.
+	reverse_proxy api:8000
+}

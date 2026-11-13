@@ -20,7 +20,7 @@ COPY scripts ./scripts
 COPY knowledge ./knowledge
 COPY evals ./evals
 USER shopassist
-EXPOSE 8000
+EXPOSE 8000 9100
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
   CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else 1)"
 # --proxy-headers: trust X-Forwarded-* from your load balancer / ingress

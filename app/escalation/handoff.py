@@ -118,13 +118,17 @@ Keep placeholders like <EMAIL_1> exactly as they are."""
 
 class HandoffService:
     def __init__(self, store: ConversationStore, gateway: ChannelGateway, helpdesk: Helpdesk, llm: LLMClient,
-                 tenant: TenantConfig, meta_app_id: str = "", meta_handover: bool = False):
+                 tenant: TenantConfig, meta_app_id: str = "", meta_handover: bool = False,
+                 public_base_url: str = ""):
         self.store, self.gateway, self.helpdesk, self.llm = store, gateway, helpdesk, llm
         self.tenant, self.meta_app_id, self.meta_handover = tenant, meta_app_id, meta_handover
+        self.public_base_url = public_base_url.rstrip("/")
 
     async def escalate(self, conversation_id: str, msg: InboundMessage, decision: EscalationDecision) -> AgentReply:
         transcript = [{"role": m.role, "text": m.text} for m in await self.store.transcript(conversation_id)]
         summary = await self._summarise(transcript)
+        if self.public_base_url:  # where the agent console / API shows this conversation
+            summary += f"\nConversation: {self.public_base_url}/agent/conversations/{conversation_id}"
         ticket_id = None
         try:
             ticket_id = await self.helpdesk.create_ticket(TicketRequest(

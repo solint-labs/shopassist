@@ -4,7 +4,7 @@
 
 > **Series:** **Part 1: Foundations** · Part 2: Grounded answers (RAG + Shopify) · Part 3: Trust (escalation, flows, privacy) · Part 4: Production (scale, enterprise, personality)
 >
-> **Code:** every part has a git tag in the companion repo. Run `git checkout part-1` to get the code exactly as this article describes it.
+> **Code:** [github.com/solint-labs/shopassist](https://github.com/solint-labs/shopassist). Every part has a git tag; run `git checkout part-1` to get the code exactly as this article describes it.
 
 Most "build a support chatbot with an LLM" tutorials stop at a prompt and an API call. That's about 10% of the work. The other 90% decides whether the bot gets switched off in week three. It has to answer only what it actually knows, hand off to a human before the customer gets angry, keep personal data out of places it shouldn't be, and survive the day your LLM provider has an outage.
 
@@ -198,7 +198,7 @@ python -m scripts.chat_cli --channel whatsapp            # talk to it in your te
 python -m scripts.send_test_webhook ig-comment "my order is late"   # signed sample webhook
 ```
 
-`DRY_RUN_OUTBOUND=true` logs every outbound Graph API call instead of sending it, so you can exercise the full loop locally before you have Meta credentials. `docs/meta-setup.md` walks through creating the app, webhooks, tokens and permissions.
+`DRY_RUN_OUTBOUND=true` logs every outbound Graph API call instead of sending it, so you can exercise the full loop locally before you have Meta credentials. `docs/meta-setup.md` walks through creating the app, webhooks, tokens and permissions. `docs/local-development.md` covers the complete local setup, including a local open-weights model through Ollama and receiving real webhooks on your laptop through a tunnel.
 
 ## What we have, and what's missing
 

@@ -22,6 +22,9 @@ class Settings(BaseSettings):
 
     # ── General ────────────────────────────────────────────────────────────────
     env: Literal["dev", "test", "staging", "prod"] = "dev"
+    # Public HTTPS origin of this deployment. Placeholder until you host it; used for the
+    # webhook URLs printed at startup and for conversation links in hand-off tickets.
+    public_base_url: str = "https://shopassist.example.com"
     log_level: str = "INFO"
     log_json: bool = False  # JSON logs in prod so your log pipeline can index fields
 

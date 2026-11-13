@@ -1,5 +1,9 @@
 name: ci
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule: [{ cron: "30 1 * * *" }]
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -10,6 +14,29 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest -q
       - name: Deterministic evals (no API keys needed)
-        run: python -m evals.run --fake --min-pass 1.0
+        run: python -m evals.run --fake --min-pass 1.0 --junit evals-junit.xml
         env: { RAG_ENCODERS: hashing, LLM_PROVIDER: fake }
-  # Add a nightly job that runs `python -m evals.run` against your real LLM with secrets.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: evals-deterministic, path: evals-junit.xml }
+
+  evals-llm:
+    # Nightly / manual: every golden case against the real LLM, graded by the LLM judge.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e ".[dev]"
+      - run: python -m evals.run --min-pass 0.9 --report evals-report.json --junit evals-junit.xml
+        env:
+          LLM_PROVIDER: ${{ vars.LLM_PROVIDER }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          JUDGE_PROVIDER: ${{ vars.JUDGE_PROVIDER }}
+          JUDGE_MODEL: ${{ vars.JUDGE_MODEL }}
+          JUDGE_API_KEY: ${{ secrets.JUDGE_API_KEY }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: evals-llm, path: "evals-*.*" }

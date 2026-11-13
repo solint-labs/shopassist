@@ -4,7 +4,7 @@
 
 > **Series:** Part 1: Foundations · Part 2: Grounded answers (RAG + Shopify) · Part 3: Trust (escalation, flows, privacy) · **Part 4: Production (scale, enterprise, personality)**
 >
-> **Code:** `git checkout part-4` (also `main`)
+> **Code:** [github.com/solint-labs/shopassist](https://github.com/solint-labs/shopassist), `git checkout part-4` (also `main`)
 
 Parts 1-3 built an agent that does the right thing. This part makes sure it *keeps* doing the right thing at volume, through provider outages and deploys, for many stores at once, under the controls an enterprise security review will ask about, and in a voice each customer actually wants.
 
@@ -153,36 +153,68 @@ Profiles store *preferences*, not personal data: no names, emails or addresses.
 
 Even with good prompts, models drift: a customer who asked for no emoji gets "Sure thing! 😊". `StyleGuard` checks every DM reply against the resolved persona and fixes it deterministically. It strips emoji beyond the allowed count, removes banned phrases, and trims prose to the verbosity limit (lists and step-by-step instructions are left alone). The fixes are recorded in reply metadata, so you can see which rules the model breaks most.
 
-## 5. Evals: the deployment gate
+## 5. Tests and evals: the deployment gate
 
-Every change to a prompt, model, threshold or knowledge base changes behaviour somewhere. Without a fixed test set, regressions surface as angry customers. `evals/cases.yaml` holds golden conversations with assertions:
+Every change to a prompt, model, threshold or knowledge base changes behaviour somewhere. Without a fixed test set, regressions surface as angry customers. The repo verifies the agent at three levels.
+
+**Unit and integration tests** (`pytest`, 150+ tests) drive real webhook payloads through the real app with the LLM, Meta and Shopify mocked. A dedicated suite, `tests/test_standard_responses.py`, checks **the exact message a customer receives** in standard journeys on each channel:
+
+- an FAQ answer retrieves the right article and ends with the policy link, with no citation markers or source tags leaking
+- WhatsApp gets `*bold*`, Messenger and Instagram get plain text, and DMs, comments and length limits are respected
+- tracking details appear only for the verified customer
+- confirmation buttons render as quick replies with titles of 20 characters or fewer
+- the hand-off message changes with business hours
+- the fallback includes the support email when every LLM is down
+
+**Golden conversations** (`evals/cases.yaml`): 58 cases in 16 categories (shipping, returns, subscriptions, brewing, FAQ, grounding, scope, safety, orders, products, flows, escalation, privacy, comments, personalisation, conversation). Each case can carry three kinds of check:
 
 ```yaml
-- id: order_status_messenger_no_leak_before_verification
-  channel: messenger
-  turns: ["where is order 1042"]
-  requires_llm: true
-  expect: { not_contains: ["Delhivery", "DL123456789IN", "Yirgacheffe"] }
+- id: returns_opened_coffee
+  category: returns
+  turns: ["Can I return an opened bag of coffee?"]
+  retrieval: { section: "Returns and refunds > Coffee beans", within: 2 }    # right article? (every mode)
+  expect: { contains_any: ["can't", "cannot"], grounded: true }             # hard assertions on the reply
+  judge: "States opened coffee can't be returned because it's perishable. May mention the Taste Promise.
+          Must not offer a refund for opened coffee."                         # graded by an LLM judge
 
-- id: comment_with_phone_hidden
-  channel: instagram
-  kind: comment
-  turns: ["call me 9876543210 about a refund"]
-  expect: { hides_comment: true, sends_dm: true }
+- id: cancel_unfulfilled_order_with_confirmation
+  category: flows
+  channel: whatsapp
+  user_id: "919800000001"
+  turns: ["I want to cancel order 1043", { text: "Yes, cancel it", payload: "yes" }]
+  expect: { contains_any: ["is cancelled"], shopify_mutation: cancel }     # side effects, not just text
 ```
 
-Cases cover grounded policy answers, refusing unknown facts, off-topic refusal, prompt injection, no data leaks before verification, flows, language preferences, every escalation scenario and comment moderation. Shopify is replaced by a deterministic fake, so results are reproducible.
+- **Retrieval checks** confirm the knowledge base surfaced the right article. They're deterministic, so they run in every mode and catch chunking and threshold regressions early.
+- **Expect checks** assert on the reply and its side effects: text present or forbidden, escalation reason, tools called, buttons shown, Shopify mutations made or *not* made, comments hidden, DMs sent, emoji stripped, length limits.
+- **Judge rubrics** are graded 1-5 by an LLM against the retrieved reference facts. Substring checks catch hard failures. Only a judge can tell whether "you can't return opened coffee, but our Taste Promise covers a different one" is a *good* answer. Use a different, ideally stronger, model as the judge (`JUDGE_PROVIDER` / `JUDGE_MODEL`), and spot-check its verdicts when you change a rubric.
 
-- `python -m evals.run --fake` runs the deterministic cases and is the **CI gate on every push** (no API keys needed).
-- `python -m evals.run` runs everything against your real LLM. Run it nightly and before any prompt or model change, and fail the deploy below your pass threshold.
+Shopify is replaced by a deterministic fake with five orders covering in transit, unfulfilled, delivered coffee, delivered equipment and high value. Results are reproducible, and flows can be tested end to end.
+
+- `python -m evals.run --fake` runs every deterministic check with a scripted fake LLM. It's the **CI gate on every push**, needs no API keys, and writes JUnit XML for the CI test tab.
+- `python -m evals.run` runs all cases plus the judge against your real LLM. CI runs it **nightly** and on demand, with a pass threshold, and saves a JSON report you can diff between runs.
 
 Add a case for every bug you fix and every flow you build. That's how the eval set becomes the most valuable file in the repo.
 
 ## 6. Deployment
 
-- **Docker Compose** (`docker-compose.yml`): API, scalable workers, Postgres, Redis (AOF on, so queued messages survive restarts) and Qdrant. `docker compose up -d --scale worker=4`.
-- **Kubernetes** (`deploy/k8s/shopassist.yaml`): API Deployment with HPA on CPU, readiness on `/readyz`; workers scaled by **KEDA's redis-streams scaler** on pending entries; graceful `SIGTERM` handling so in-flight turns finish; a retention CronJob; tenant YAML from a ConfigMap, secrets from a Secret or External Secrets.
-- **Capacity:** worker throughput ≈ replicas × concurrency ÷ mean turn time. The cross-encoder reranker is CPU-bound, so give workers real CPU or move reranking to a GPU inference server.
+The repo ships two deployment paths with step-by-step guides (`docs/deployment.md`). Local setup is in `docs/local-development.md`.
+
+**One server with Docker Compose.** `docker compose --profile tls up -d --build` starts the API, two workers, Postgres, Redis (with AOF on, so queued messages survive restarts), Qdrant, and **Caddy**. Caddy obtains Let's Encrypt certificates automatically for your domain and blocks `/admin`, `/agent` and `/metrics` from outside your office or VPN ranges. Databases bind to localhost only. Scale with `docker compose up -d --scale worker=4`. A daily cron runs retention.
+
+**Kubernetes** (`deploy/k8s/`). The API is a Deployment with an HPA on CPU and readiness on `/readyz`. Workers are scaled by **KEDA's redis-streams scaler** on pending entries and handle `SIGTERM` gracefully, so in-flight turns finish. A retention CronJob handles cleanup, and Ingress with cert-manager handles TLS (public webhooks on one Ingress, IP-restricted operator paths on another). Postgres, Redis and Qdrant come from managed services. Secrets come from a Secret or External Secrets, and tenant YAML from a ConfigMap.
+
+Either way, the go-live sequence is the same:
+
+1. point DNS at the server or ingress, and set `PUBLIC_BASE_URL` (a `shopassist.example.com` placeholder until then)
+2. generate keys with `make keys`
+3. start the stack and check `/readyz`
+4. ingest knowledge, including Shopify content
+5. create named operator keys and retire the bootstrap key
+6. register `https://<domain>/webhooks/meta` with Meta and `https://<domain>/webhooks/shopify/compliance` with Shopify
+7. run the real-LLM evals against the production configuration before switching traffic on
+
+**Capacity:** worker throughput ≈ replicas × concurrency ÷ mean turn time. The cross-encoder reranker is CPU-bound, so give workers real CPU or move reranking to a GPU inference server.
 
 ## A production checklist
 
@@ -195,11 +227,11 @@ Add a case for every bug you fix and every flow you build. That's how the eval s
 - [ ] PII vault keys in a secret manager; rotation rehearsed; log redaction on; retention job scheduled
 - [ ] Shopify GDPR webhooks registered and tested
 - [ ] RBAC keys issued per person or system; bootstrap key removed; audit log reviewed
-- [ ] Eval suite in CI; real-LLM evals nightly; a new case for every incident
+- [ ] Deterministic evals in CI on every push; real-LLM evals with the judge nightly; a new case for every incident
 - [ ] Meta Graph API and Shopify API versions on a calendar for annual and quarterly bumps
 
 ## Closing thoughts
 
 Look back at where the code went across the four parts. The LLM call is a handful of lines. Everything else exists because **the model proposes and the system disposes**. Retrieval decides what the model may know. Tools decide what it may see. Flows decide what it may do. Escalation rules decide when it should step aside. The vault decides what it may hold. The queue and the breakers decide what happens when things break. StyleGuard and evals decide whether it sounded right and stayed right.
 
-That's the difference between a demo and a support agent you can put your brand's name on. The full code, with 111 tests and four tagged stages, is in the companion repo. Start from `part-1`, read the diffs between tags alongside each article, and build out the parts your store needs.
+That's the difference between a demo and a support agent you can put your brand's name on. The full code, with 150+ tests, 58 golden conversations and four tagged stages, is at [github.com/solint-labs/shopassist](https://github.com/solint-labs/shopassist). Start from `part-1`, read the diffs between tags alongside each article, and build out the parts your store needs.

@@ -88,20 +88,37 @@ persona = tenant ▸ channel override ▸ A/B variant ▸ customer profile  ─�
 - `evals/`: golden conversations and a runner (`python -m evals.run`). Use it as the CI gate.
 - `deploy/k8s/`, `docker-compose.yml` (api + workers + Redis + Postgres + Qdrant), [docs/operations.md](docs/operations.md)
 
-## Quick start
+## Getting started
+
+- **Local development:** [docs/local-development.md](docs/local-development.md) covers install, the fake LLM,
+  a real or local LLM, the knowledge base, the full stack with workers, and tunnelling real Meta webhooks
+- **Production deployment:** [docs/deployment.md](docs/deployment.md) covers Docker Compose with automatic HTTPS
+  (Caddy), Kubernetes (HPA + KEDA), multi-tenant setup, webhook registration and a go-live checklist
+- **Channel and store setup:** [docs/meta-setup.md](docs/meta-setup.md), [docs/shopify-setup.md](docs/shopify-setup.md)
+- **Operations:** [docs/operations.md](docs/operations.md) covers alerts and runbooks
 
 ```bash
+git clone https://github.com/solint-labs/shopassist.git && cd shopassist
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-cp .env.example .env            # set LLM_PROVIDER / LLM_MODEL / LLM_API_KEY
+cp .env.example .env            # works as-is with the fake LLM; set LLM_* for real replies
 
-make test                       # runs offline with the fake LLM
+make test                       # ~150 tests, offline
+make evals                      # golden conversations, deterministic checks
 make chat                       # talk to the agent in your terminal
-make run                        # start the API on :8000
-python -m scripts.send_test_webhook whatsapp "Do you ship to Pune?"   # signed sample webhook
+make run                        # API on :8000 (OpenAPI UI at /docs)
 ```
 
-To connect real channels, see [docs/meta-setup.md](docs/meta-setup.md).
+`shopassist.example.com` in `.env.example` and the deploy configs is a placeholder. Replace it with your
+domain after hosting.
+
+## Tests and evals
+
+| Layer | Where | What it verifies |
+|---|---|---|
+| Unit + integration tests | `tests/` (`make test`) | webhook signatures and parsing, formatting per channel, RAG retrieval and grounding, Shopify auth/throttling/verification, flows, escalation scenarios, PII vault, GDPR webhooks, queue workers, failover, RBAC, personalisation |
+| Standard-response tests | `tests/test_standard_responses.py` | the exact message customers receive for standard journeys on each channel: FAQ answers with policy links, formatting and length limits, order tracking, buttons, hand-off messages |
+| Golden conversations | `evals/cases.yaml` (`make evals`, `make evals-llm`) | 58 cases in 16 categories: retrieval picks the right article, hard assertions on replies and side effects, and an LLM judge grading each reply against a rubric |
 
 ## Deploy
 
@@ -110,10 +127,7 @@ For Kubernetes, see `deploy/k8s/shopassist.yaml` (HPA for the API, KEDA scaling 
 on queue backlog, a retention CronJob). The image is a slim, non-root, multi-stage build.
 Put it behind HTTPS (Meta only calls HTTPS webhooks). Operating guide: [docs/operations.md](docs/operations.md).
 
-```bash
-make test                               # 110+ tests, offline
-python -m evals.run                     # golden conversations against your real LLM
-```
+Step-by-step: [docs/deployment.md](docs/deployment.md).
 
 ## License
 

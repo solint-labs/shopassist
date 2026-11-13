@@ -149,7 +149,8 @@ def create_app(settings: Settings | None = None, **overrides: Any) -> FastAPI:
         tools = overrides.get("tools") or ToolRegistry(
             (build_commerce_tools(shopify) if shopify else []) + build_flow_tools()
             + build_profile_tools(profiles, cfg.tenant_id))
-        handoff = HandoffService(store, gateway, helpdesk, llm, cfg, settings.meta_app_id, settings.meta_handover)
+        handoff = HandoffService(store, gateway, helpdesk, llm, cfg, settings.meta_app_id, settings.meta_handover,
+                                 settings.public_base_url)
         agent = Agent(llm, store, cfg, settings.history_turns, retriever=retriever, tools=tools,
                       max_tool_rounds=settings.max_tool_rounds, append_source_link=settings.rag_append_source_link,
                       vault=vault, handoff=handoff, flows=flows, shopify=shopify, profiles=profiles)
@@ -169,7 +170,9 @@ def create_app(settings: Settings | None = None, **overrides: Any) -> FastAPI:
         if redis and settings.queue_mode == "redis":
             await app.state.queue.ensure_group()
         log.info("app.started", env=settings.env, version=__version__, tenants=list(registry.tenants),
-                 queue=settings.queue_mode, llm=getattr(llm, "name", "?"))
+                 queue=settings.queue_mode, llm=getattr(llm, "name", "?"),
+                 meta_webhook=f"{settings.public_base_url}/webhooks/meta",
+                 shopify_compliance_webhook=f"{settings.public_base_url}/webhooks/shopify/compliance")
         yield
         await gateway.fb.aclose()
         await gateway.ig.aclose()

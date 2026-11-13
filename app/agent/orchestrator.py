@@ -224,7 +224,8 @@ class Agent:
             answer = finalize_answer(text, retrieval, self.append_source_link, used_tools=bool(tools_used))
             reply = AgentReply(text=answer.text, meta={
                 **usage, "tools": tools_used, "kb_hits": len(retrieval.hits), "kb_top": round(retrieval.top_score, 3),
-                "cited": answer.cited, "grounded": answer.grounded, "query": retrieval.query})
+                "cited": answer.cited, "grounded": answer.grounded, "query": retrieval.query,
+                "kb_sections": [h.section for h in retrieval.hits]})
             # 7. unresolved-answer tracking: two in a row triggers "repeated_failure" next turn
             unresolved = (not answer.grounded) or (not retrieval.found and not tools_used and UNCERTAIN_RE.search(text))
             state["failed_answers"] = state.get("failed_answers", 0) + 1 if unresolved else 0
