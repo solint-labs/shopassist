@@ -24,9 +24,18 @@ from app.channels.graph_client import GraphClient
 from app.channels.webhook import router as webhook_router
 from app.commerce.shopify import ShopifyClient
 from app.commerce.tools import ToolRegistry, build_commerce_tools
+from app.escalation.agent_api import router as agent_router
+from app.escalation.handoff import HandoffService, NullHelpdesk, WebhookHelpdesk, ZendeskHelpdesk
+from app.flows.engine import FlowEngine
+from app.flows.orders import CancelOrderFlow, ForgetMeFlow, ReturnRequestFlow
+from app.flows.tools import build_flow_tools
 from app.llm.factory import build_llm
 from app.logging_config import configure_logging, log
 from app.pipeline import MessagePipeline
+from app.privacy.compliance import PrivacyService
+from app.privacy.compliance import router as privacy_router
+from app.privacy.pii import PIIDetector
+from app.privacy.vault import PIIVault, generate_key
 from app.rag.encoders import build_encoders
 from app.rag.ingest import Ingestor, load_markdown_dir
 from app.rag.retriever import Retriever
@@ -52,6 +61,25 @@ def build_shopify(s: Settings) -> ShopifyClient | None:
         client_id=s.shopify_client_id,
         client_secret=s.shopify_client_secret.get_secret_value() if s.shopify_client_secret else None,
     )
+
+
+def build_vault(s: Settings, db: Database) -> PIIVault:
+    keys = [k.strip() for k in s.pii_encryption_keys.get_secret_value().split(",") if k.strip()]
+    bkey = s.pii_blind_index_key.get_secret_value()
+    if not keys or not bkey:
+        if s.env in ("staging", "prod"):
+            raise RuntimeError("PII_ENCRYPTION_KEYS and PII_BLIND_INDEX_KEY are required outside dev/test")
+        log.warning("privacy.ephemeral_keys", detail="dev/test only: vault data won't survive a restart")
+        keys, bkey = keys or [generate_key()], bkey or generate_key()
+    return PIIVault(db, keys, bkey, PIIDetector(use_ner=s.pii_ner))
+
+
+def build_helpdesk(s: Settings):
+    if s.helpdesk == "zendesk":
+        return ZendeskHelpdesk(s.zendesk_subdomain, s.zendesk_email, s.zendesk_api_token.get_secret_value())
+    if s.helpdesk == "webhook":
+        return WebhookHelpdesk(s.helpdesk_webhook_url, s.helpdesk_webhook_secret.get_secret_value())
+    return NullHelpdesk()
 
 
 def create_app(settings: Settings | None = None, **overrides: Any) -> FastAPI:
@@ -80,10 +108,19 @@ def create_app(settings: Settings | None = None, **overrides: Any) -> FastAPI:
         knowledge, reranker, llm, settings.rag_top_k, settings.rag_top_n, settings.rag_min_score,
         settings.rag_condense_query)
     shopify = overrides.get("shopify", build_shopify(settings))
-    tools = overrides.get("tools") or ToolRegistry(build_commerce_tools(shopify) if shopify else [])
+    tools = overrides.get("tools") or ToolRegistry(
+        (build_commerce_tools(shopify) + build_flow_tools()) if shopify else build_flow_tools())
 
-    agent = Agent(llm, ConversationStore(db), tenant, settings.history_turns, retriever=retriever, tools=tools,
-                  max_tool_rounds=settings.max_tool_rounds, append_source_link=settings.rag_append_source_link)
+    # ── Part 3: privacy, escalation, flows ──────────────────────────────────
+    store = ConversationStore(db)
+    vault = overrides.get("vault") or build_vault(settings, db)
+    helpdesk = overrides.get("helpdesk") or build_helpdesk(settings)
+    handoff = HandoffService(store, gateway, helpdesk, llm, tenant, settings.meta_app_id, settings.meta_handover)
+    flows = FlowEngine([CancelOrderFlow(), ReturnRequestFlow(), ForgetMeFlow()])
+
+    agent = Agent(llm, store, tenant, settings.history_turns, retriever=retriever, tools=tools,
+                  max_tool_rounds=settings.max_tool_rounds, append_source_link=settings.rag_append_source_link,
+                  vault=vault, handoff=handoff, flows=flows, shopify=shopify)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -98,7 +135,7 @@ def create_app(settings: Settings | None = None, **overrides: Any) -> FastAPI:
             await shopify.aclose()
         await db.dispose()
 
-    app = FastAPI(title="ShopAssist", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="ShopAssist", version="0.3.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.db = db
     app.state.tenant = tenant
@@ -108,8 +145,12 @@ def create_app(settings: Settings | None = None, **overrides: Any) -> FastAPI:
     app.state.shopify = shopify
     app.state.agent = agent
     app.state.pipeline = MessagePipeline(agent, gateway)
+    app.state.handoff = handoff
+    app.state.privacy = PrivacyService(store, vault)
 
     app.include_router(webhook_router)
+    app.include_router(agent_router)
+    app.include_router(privacy_router)
 
     @app.get("/healthz", tags=["ops"])
     async def healthz() -> dict:

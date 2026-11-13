@@ -116,6 +116,7 @@ COMMENT_TRIAGE_INSTRUCTIONS = """\
 Decide how to respond to this public Instagram comment. Return JSON with exactly these keys:
   "public_reply": a short, friendly public reply (or "" if no public reply is appropriate),
   "send_dm": true if the topic needs private details (orders, refunds, delivery problems, complaints, account issues),
-  "dm_text": the opening private message to send if send_dm is true, else "".
+  "dm_text": the opening private message to send if send_dm is true, else "",
+  "moderation": "ok", or "spam" (promotions, scams, bots, unrelated links) or "abusive" (insults, harassment, hate).
 If send_dm is true, the public reply should say you've sent them a DM, and contain no personal details.
 Topics that must move to DM: {topics}."""

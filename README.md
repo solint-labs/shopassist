@@ -51,6 +51,24 @@ history ─► condense follow-up ─► hybrid search (BGE dense + BM25 sparse,
 - `knowledge/brewline/`: the sample help center; `scripts/ingest.py` indexes it plus Shopify policies, pages and products
 - Setup: [docs/shopify-setup.md](docs/shopify-setup.md)
 
+## Part 3: what's added
+
+```
+inbound ─► pseudonymise PII (<EMAIL_1>, encrypted vault) ─► human owns thread? → stay silent
+        ─► escalation rules (safety · legal · human request · frustration · repeated failure)
+        ─► active flow? (cancel order · return request · forget me): code, not the LLM
+        ─► RAG + LLM ⇄ tools (+ start_* flow tools, escalate_to_human)
+        ─► rehydrate placeholders only for delivery to this customer
+```
+
+- `app/privacy/`: regex + Luhn + Presidio detection, Fernet vault with blind index and key rotation,
+  log redaction, Shopify GDPR webhooks (`customers/data_request`, `customers/redact`, `shop/redact`), retention
+- `app/escalation/`: rule-based detector with business hours, hand-off with LLM summary, Zendesk/webhook helpdesk,
+  Meta handover protocol (Page/IG inbox), and a human-agent API (`/agent/...`) that respects messaging windows
+- `app/flows/`: a small flow engine plus cancel-order, return-request and forget-me flows with confirmation buttons
+- Instagram moderation: hide spam/abuse and comments that expose personal data, then move to DM
+- `scripts/retention.py`: daily retention, key rotation, auto-release of idle hand-offs
+
 ## Quick start
 
 ```bash

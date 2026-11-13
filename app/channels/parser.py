@@ -14,6 +14,7 @@ without captions...) is skipped deliberately rather than crashing the webhook.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -101,7 +102,10 @@ def _parse_messaging(payload: dict[str, Any], channel: Channel) -> list[InboundM
     out: list[InboundMessage] = []
     for entry in payload.get("entry", []):
         business_id = str(entry.get("id", ""))
-        for ev in entry.get("messaging", []):
+        events = [(ev, False) for ev in entry.get("messaging", [])]
+        # "standby" = messages sent while another app (e.g. the Page inbox) owns the thread.
+        events += [(ev, True) for ev in entry.get("standby", [])]
+        for ev, standby in events:
             msg = ev.get("message")
             postback = ev.get("postback")
             if msg:
@@ -124,6 +128,7 @@ def _parse_messaging(payload: dict[str, Any], channel: Channel) -> list[InboundM
                         text=text,
                         timestamp=_ts(ev.get("timestamp")),
                         payload=qr,
+                        standby=standby,
                         raw=ev,
                     )
                 )
@@ -138,6 +143,7 @@ def _parse_messaging(payload: dict[str, Any], channel: Channel) -> list[InboundM
                         text=postback.get("title", ""),
                         timestamp=_ts(ev.get("timestamp")),
                         payload=postback.get("payload"),
+                        standby=standby,
                         raw=ev,
                     )
                 )
@@ -173,4 +179,31 @@ def _parse_ig_comments(payload: dict[str, Any]) -> list[InboundMessage]:
                     raw=v,
                 )
             )
+    return out
+
+
+# ── Handover protocol events (Part 3) ─────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class HandoverEvent:
+    channel: Channel
+    business_id: str
+    user_id: str
+    new_owner_app_id: str | None
+    metadata: str | None
+
+
+def parse_handover_events(payload: dict[str, Any]) -> list[HandoverEvent]:
+    """`pass_thread_control` events tell us who owns a Messenger/IG conversation now."""
+    channel = {"page": Channel.MESSENGER, "instagram": Channel.INSTAGRAM}.get(payload.get("object", ""))
+    if channel is None:
+        return []
+    out = []
+    for entry in payload.get("entry", []):
+        for ev in entry.get("messaging", []):
+            ptc = ev.get("pass_thread_control")
+            if ptc:
+                out.append(HandoverEvent(channel, str(entry.get("id", "")), str(ev.get("sender", {}).get("id", "")),
+                                         str(ptc.get("new_owner_app_id") or "") or None, ptc.get("metadata")))
     return out

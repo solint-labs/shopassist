@@ -148,6 +148,31 @@ class ShopifyClient:
                 return out
             cursor = conn["pageInfo"]["endCursor"]
 
+    # ── Mutations used by flows (Part 3) ─────────────────────────────────────
+
+    async def cancel_order(self, order_gid: str, staff_note: str = "") -> dict[str, Any]:
+        """Cancel, refund to the original payment method, restock, and email the customer.
+
+        Irreversible. Only ever called from a flow *after* explicit customer confirmation.
+        Needs the write_orders scope. Cancellation runs as an async job on Shopify's side.
+        """
+        data = await self.graphql(CANCEL_MUTATION, {"orderId": order_gid, "staffNote": staff_note[:255]})
+        res = data["orderCancel"]
+        if res.get("orderCancelUserErrors"):
+            raise ShopifyError("; ".join(e["message"] for e in res["orderCancelUserErrors"]))
+        return res.get("job") or {}
+
+    async def request_return(self, order_gid: str, items: list[dict[str, Any]]) -> dict[str, Any]:
+        """Create a return in REQUESTED status (merchant approves/declines). Needs write_returns.
+
+        items: [{"fulfillmentLineItemId", "quantity", "customerNote", optional "returnReasonDefinitionId"}]
+        """
+        data = await self.graphql(RETURN_REQUEST_MUTATION, {"input": {"orderId": order_gid, "returnLineItems": items}})
+        res = data["returnRequest"]
+        if res.get("userErrors"):
+            raise ShopifyError("; ".join(e["message"] for e in res["userErrors"]))
+        return res["return"]
+
     async def aclose(self) -> None:
         await self.http.aclose()
 
@@ -174,8 +199,9 @@ query OrderByName($q: String!) {
       totalPriceSet { shopMoney { amount currencyCode } }
       lineItems(first: 20) { nodes { title quantity } }
       fulfillments(first: 5) {
-        status displayStatus inTransitAt deliveredAt estimatedDeliveryAt
+        status displayStatus inTransitAt deliveredAt estimatedDeliveryAt createdAt
         trackingInfo(first: 3) { company number url }
+        fulfillmentLineItems(first: 20) { nodes { id quantity lineItem { title product { productType } } } }
       }
     }
   }
@@ -205,3 +231,20 @@ query Catalog($n: Int!, $after: String) {
 POLICIES_QUERY = "query { shop { shopPolicies { title body type url } } }"
 
 PAGES_QUERY = "query Pages($n: Int!) { pages(first: $n) { nodes { id title handle body updatedAt } } }"
+
+CANCEL_MUTATION = """
+mutation CancelOrder($orderId: ID!, $staffNote: String) {
+  orderCancel(orderId: $orderId, reason: CUSTOMER, restock: true, notifyCustomer: true,
+              refundMethod: {originalPaymentMethodsRefund: true}, staffNote: $staffNote) {
+    job { id done }
+    orderCancelUserErrors { field message code }
+  }
+}"""
+
+RETURN_REQUEST_MUTATION = """
+mutation RequestReturn($input: ReturnRequestInput!) {
+  returnRequest(input: $input) {
+    return { id name status }
+    userErrors { field message }
+  }
+}"""

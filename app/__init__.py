@@ -10,4 +10,4 @@ The package is organised by responsibility:
 Each part of the blog series adds packages next to these rather than rewriting them.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"

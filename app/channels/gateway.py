@@ -8,9 +8,14 @@ The agent decides *what* to say (`AgentReply`); the gateway decides *how* to del
   IG comment      POST /{COMMENT_ID}/replies                      (public reply)
   IG private      POST /{PAGE_ID or IG_ID}/messages               (recipient.comment_id)
                   -> one DM to the commenter, within 7 days of the comment
+  IG moderation   POST /{COMMENT_ID}?hide=true                    (Part 3)
+  Hand-off        POST /{PAGE_ID}/pass_thread_control             (Part 3, Messenger/IG)
+
+Buttons (Part 3) render natively per channel: WhatsApp interactive reply buttons
+(max 3) and Messenger/Instagram quick replies (max 13).
 
 Credentials are looked up per business id through a `CredentialResolver`, so the same
-gateway serves one store (Part 1) or many tenants (Part 4).
+gateway serves one store (Parts 1-3) or many tenants (Part 4).
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ from typing import Protocol
 
 from app.channels.formatting import format_for_channel
 from app.channels.graph_client import GraphAPIError, GraphClient
-from app.domain import AgentReply, Channel, InboundMessage, MessageKind
+from app.domain import AgentReply, Channel, InboundMessage, MessageKind, QuickReply
 from app.logging_config import log
 from app.settings import Settings
 
@@ -63,34 +68,46 @@ class ChannelGateway:
     async def deliver(self, msg: InboundMessage, reply: AgentReply) -> None:
         """Send `reply` back on the same surface the customer used."""
         if msg.kind == MessageKind.COMMENT:
+            if "hide_comment" in reply.actions:
+                await self.hide_comment(msg)
             if reply.text:
                 await self.reply_to_comment(msg, format_for_channel(reply.text, msg.channel, MessageKind.COMMENT))
             if reply.private_text:
                 await self.private_reply(msg, format_for_channel(reply.private_text, msg.channel))
             return
-        await self.send_text(msg, format_for_channel(reply.text, msg.channel))
+        if reply.text:
+            await self.send_text(msg, format_for_channel(reply.text, msg.channel), reply.quick_replies)
 
     # ── Primitives ───────────────────────────────────────────────────────────
 
-    async def send_text(self, msg: InboundMessage, text: str) -> dict:
+    async def send_text(self, msg: InboundMessage, text: str, quick_replies: list[QuickReply] | None = None,
+                        human_agent_tag: bool = False) -> dict:
         c = self.creds.for_message(msg)
+        quick_replies = quick_replies or []
         if msg.channel == Channel.WHATSAPP:
-            body = {
-                "messaging_product": "whatsapp",
-                "recipient_type": "individual",
-                "to": msg.user_id,
-                "type": "text",
-                "text": {"body": text, "preview_url": False},
+            body: dict = {"messaging_product": "whatsapp", "recipient_type": "individual", "to": msg.user_id}
+            if quick_replies:
+                body |= {"type": "interactive", "interactive": {
+                    "type": "button", "body": {"text": text[:1024]},
+                    "action": {"buttons": [{"type": "reply", "reply": {"id": q.id, "title": q.title[:20]}}
+                                           for q in quick_replies[:3]]}}}
+            else:
+                body |= {"type": "text", "text": {"body": text, "preview_url": False}}
+            if msg.message_id:
                 # Threads our answer under the customer's message in WhatsApp's UI.
-                "context": {"message_id": msg.message_id},
-            }
+                body["context"] = {"message_id": msg.message_id}
         else:
-            body = {
-                "recipient": {"id": msg.user_id},
+            message: dict = {"text": text}
+            if quick_replies:
+                message["quick_replies"] = [{"content_type": "text", "title": q.title[:20], "payload": q.id}
+                                            for q in quick_replies[:13]]
+            body = {"recipient": {"id": msg.user_id}, "message": message}
+            if human_agent_tag:
+                # Human agents may reply up to 7 days after the customer's last message.
+                body |= {"messaging_type": "MESSAGE_TAG", "tag": "HUMAN_AGENT"}
+            else:
                 # RESPONSE = replying inside the 24h customer-service window.
-                "messaging_type": "RESPONSE",
-                "message": {"text": text},
-            }
+                body["messaging_type"] = "RESPONSE"
         return await self._client(msg.channel).post(f"{c.sender_node}/messages", c.token, body)
 
     async def reply_to_comment(self, msg: InboundMessage, text: str) -> dict:
@@ -102,6 +119,21 @@ class ChannelGateway:
         c = self.creds.for_message(msg)
         body = {"recipient": {"comment_id": msg.message_id}, "message": {"text": text}}
         return await self.ig.post(f"{c.sender_node}/messages", c.token, body)
+
+    async def hide_comment(self, msg: InboundMessage) -> dict:
+        """Hide a comment: it stays visible to its author, hidden from everyone else."""
+        c = self.creds.for_message(msg)
+        return await self.ig.post(f"{msg.message_id}?hide=true", c.token, {})
+
+    async def pass_thread_control(self, msg: InboundMessage, target_app_id: str, metadata: str = "") -> dict:
+        c = self.creds.for_message(msg)
+        body = {"recipient": {"id": msg.user_id}, "target_app_id": target_app_id, "metadata": metadata[:1000]}
+        return await self._client(msg.channel).post(f"{c.sender_node}/pass_thread_control", c.token, body)
+
+    async def take_thread_control(self, msg: InboundMessage, metadata: str = "") -> dict:
+        c = self.creds.for_message(msg)
+        body = {"recipient": {"id": msg.user_id}, "metadata": metadata[:1000]}
+        return await self._client(msg.channel).post(f"{c.sender_node}/take_thread_control", c.token, body)
 
     async def acknowledge(self, msg: InboundMessage) -> None:
         """Show 'seen' + typing indicator while the LLM thinks. Best-effort only."""

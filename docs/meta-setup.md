@@ -45,13 +45,25 @@ INSTAGRAM_ACCESS_TOKEN=<IG user token>
 INSTAGRAM_MESSAGING_NODE=<IG professional account id>
 ```
 
-and add the Instagram app secret to the signature check (see `app/channels/webhook.py`).
+and set `INSTAGRAM_APP_SECRET`, because Instagram Login webhooks are signed with the Instagram app secret.
 
 **Comments**: public replies go to `POST /{comment-id}/replies`. Anything that needs personal
 details moves to DM via a **private reply** (`recipient.comment_id`). Meta allows one private reply
 per comment, sent within 7 days of the comment.
 
-## 5. API versions
+## 5. Hand-off to the Page / Instagram inbox (Part 3)
+
+Set `META_APP_ID` and `META_HANDOVER=true`. When ShopAssist escalates a Messenger or Instagram
+conversation, it calls `pass_thread_control` with the inbox app ids Meta documents
+(`263902037430900` for the Page inbox, `1217981644879628` for the Instagram inbox). Your team can then
+answer from Meta Business Suite. When they mark the conversation done, thread control comes back
+(`messaging_handovers` webhook) and the bot resumes. Messages sent while the inbox owns the thread
+arrive on the `standby` field. ShopAssist records them and doesn't reply.
+
+If your Page uses **Conversation Routing**, pass and release of thread control still work through the
+handover API, but other handover features are disabled.
+
+## 6. API versions
 
 `META_GRAPH_VERSION` is set in one place (default `v27.0`). Meta keeps each version usable for
 about two years after the next one ships, so plan to bump it about once a year.

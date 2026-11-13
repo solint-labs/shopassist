@@ -42,6 +42,10 @@ def settings(tmp_path) -> Settings:
         rag_ingest_on_startup=True,
         shopify_shop="brewline",
         shopify_access_token=SecretStr("shpat_test"),
+        shopify_webhook_secret=SecretStr("shopify-secret"),
+        agent_api_key=SecretStr("agent-key"),
+        meta_app_id="APP_123",
+        meta_handover=True,
     )
 
 
@@ -57,6 +61,7 @@ class ShopifyMock:
         self.orders: dict[str, dict] = {}
         self.products: list[dict] = []
         self.requests: list[dict] = []
+        self.mutations: list[tuple[str, dict]] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
@@ -68,6 +73,14 @@ class ShopifyMock:
             return httpx.Response(200, json={"data": {"orders": {"nodes": [node] if node else []}}})
         if "Products" in q:
             return httpx.Response(200, json={"data": {"products": {"nodes": self.products}}})
+        if "CancelOrder" in q:
+            self.mutations.append(("cancel", body["variables"]))
+            return httpx.Response(200, json={"data": {"orderCancel": {
+                "job": {"id": "gid://shopify/Job/1", "done": False}, "orderCancelUserErrors": []}}})
+        if "RequestReturn" in q:
+            self.mutations.append(("return", body["variables"]))
+            return httpx.Response(200, json={"data": {"returnRequest": {
+                "return": {"id": "gid://shopify/Return/1", "name": "#1042-R1", "status": "REQUESTED"}, "userErrors": []}}})
         return httpx.Response(200, json={"data": {}})
 
 
@@ -110,16 +123,29 @@ def sent_bodies(graph_mock) -> list[tuple[str, dict]]:
             if c.request.url.host == "graph.facebook.com"]
 
 
-def sample_order(name="1042", phone="+91 98000 00001", email="asha@example.com"):
+def sample_order(name="1042", phone="+91 98000 00001", email="asha@example.com", fulfillment="FULFILLED",
+                 delivered_days_ago: int | None = 3, total="1240.00",
+                 items=(("Ethiopia Yirgacheffe 250g", 2),)):
+    from datetime import datetime, timedelta, timezone
+
+    delivered = (datetime.now(timezone.utc) - timedelta(days=delivered_days_ago)).isoformat() \
+        if delivered_days_ago is not None else None
+    fulfillments = [] if fulfillment == "UNFULFILLED" else [{
+        "status": "SUCCESS", "displayStatus": "DELIVERED" if delivered else "IN_TRANSIT",
+        "inTransitAt": "2026-11-10T08:00:00Z", "deliveredAt": delivered, "createdAt": "2026-11-09T08:00:00Z",
+        "estimatedDeliveryAt": "2026-11-14T18:00:00Z",
+        "trackingInfo": [{"company": "Delhivery", "number": "DL123456789IN", "url": "https://track.example/DL123456789IN"}],
+        "fulfillmentLineItems": {"nodes": [{"id": f"gid://shopify/FulfillmentLineItem/{i}", "quantity": q,
+                                            "lineItem": {"title": t, "product": {"productType": "Equipment" if "Dripper" in t or "Grinder" in t
+                                                                         else "Coffee"}}}
+                                           for i, (t, q) in enumerate(items, 1)]},
+    }]
     return {
         "id": "gid://shopify/Order/1", "name": f"#{name}", "createdAt": "2026-11-08T10:00:00Z",
         "cancelledAt": None, "closedAt": None, "displayFinancialStatus": "PAID",
-        "displayFulfillmentStatus": "FULFILLED", "email": email, "phone": phone,
+        "displayFulfillmentStatus": fulfillment, "email": email, "phone": phone,
         "shippingAddress": {"city": "Pune", "provinceCode": "MH", "countryCodeV2": "IN", "phone": phone},
-        "totalPriceSet": {"shopMoney": {"amount": "1240.00", "currencyCode": "INR"}},
-        "lineItems": {"nodes": [{"title": "Ethiopia Yirgacheffe 250g", "quantity": 2}]},
-        "fulfillments": [{"status": "SUCCESS", "displayStatus": "IN_TRANSIT", "inTransitAt": "2026-11-10T08:00:00Z",
-                          "deliveredAt": None, "estimatedDeliveryAt": "2026-11-14T18:00:00Z",
-                          "trackingInfo": [{"company": "Delhivery", "number": "DL123456789IN",
-                                            "url": "https://track.example/DL123456789IN"}]}],
+        "totalPriceSet": {"shopMoney": {"amount": total, "currencyCode": "INR"}},
+        "lineItems": {"nodes": [{"title": t, "quantity": q} for t, q in items]},
+        "fulfillments": fulfillments,
     }

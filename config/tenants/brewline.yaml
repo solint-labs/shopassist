@@ -42,3 +42,31 @@ comment_policy:
 
 extra_instructions:
   - Never promise delivery dates, refunds or discounts you cannot verify.
+
+# ── Part 3: escalation, returns and cancellations ────────────────────────────
+escalation:
+  human_request_keywords: ["insaan se baat", "agent se baat", "kisi se baat karao"]   # Hinglish
+  frustration_threshold: 0.6
+  max_failed_answers: 2
+  high_value_threshold: 5000        # INR - bigger refunds/cancellations go to a human
+  business_hours:
+    timezone: Asia/Kolkata
+    days: [0, 1, 2, 3, 4, 5]        # Mon-Sat
+    start: "09:00"
+    end: "19:00"
+  in_hours_message: >-
+    I'm bringing in a teammate from the Brewline crew. They'll reply right here in a few minutes.
+  out_of_hours_message: >-
+    I've passed this to the Brewline team. They're offline right now (Mon-Sat, 9am-7pm IST)
+    but will reply here first thing.
+
+returns:
+  perishable_product_types: [Coffee, Coffee Subscription]
+  perishable_keywords: [coffee, beans, ground, blend, roast, decaf]
+  unopened_perishable_days: 14
+  equipment_days: 30
+  damaged_report_days: 7
+  reason_definition_ids: {}         # optional: map damaged/unopened/unused/other -> Shopify ReturnReasonDefinition ids
+
+cancellation:
+  allowed_fulfillment_statuses: [UNFULFILLED]   # i.e. not roasted/shipped yet

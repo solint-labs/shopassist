@@ -40,6 +40,9 @@ class InboundMessage:
     parent_comment_id: str | None = None
     # Postbacks / quick-reply payloads (button taps) arrive here
     payload: str | None = None
+    # True for Messenger/IG "standby" events: the customer wrote while another app
+    # (e.g. the Page inbox, after a hand-off) owns the thread. We record, never reply.
+    standby: bool = False
     raw: dict | None = None  # original event, kept for debugging; never logged in prod
 
     @property
@@ -54,11 +57,22 @@ class InboundMessage:
 
 
 @dataclass(slots=True)
+class QuickReply:
+    """A tappable option: WhatsApp reply button / Messenger & Instagram quick reply."""
+
+    id: str  # comes back as InboundMessage.payload when tapped
+    title: str  # max 20 characters on every channel
+
+
+@dataclass(slots=True)
 class AgentReply:
     """What the agent decided to say. Delivery is a separate concern."""
 
     text: str
     # For Instagram comments: an optional private DM sent in addition to the public reply.
     private_text: str | None = None
+    quick_replies: list[QuickReply] = field(default_factory=list)
+    # Side effects for the gateway, e.g. "hide_comment" (Instagram moderation).
+    actions: list[str] = field(default_factory=list)
     # Free-form metadata for logs/analytics (model, latency, sources used...)
     meta: dict = field(default_factory=dict)

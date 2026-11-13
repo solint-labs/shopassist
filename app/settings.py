@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     instagram_api_host: str = "https://graph.facebook.com"
     instagram_access_token: SecretStr | None = None  # falls back to page_access_token
     instagram_messaging_node: str | None = None  # falls back to page_id
+    instagram_app_secret: SecretStr | None = None  # only for Instagram Login webhooks
 
     # When true, outbound messages are logged instead of sent. Handy for local runs
     # against recorded webhook payloads and for staging environments.
@@ -100,6 +101,28 @@ class Settings(BaseSettings):
     shopify_client_secret: SecretStr | None = None
 
     max_tool_rounds: int = 4  # safety cap on LLM <-> tool iterations per turn
+
+    # ── Privacy (Part 3) ──────────────────────────────────────────────────────
+    # Comma-separated Fernet keys, newest first (old keys stay for decryption during rotation).
+    # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    pii_encryption_keys: SecretStr = SecretStr("")
+    pii_blind_index_key: SecretStr = SecretStr("")
+    pii_ner: bool = False  # Presidio NER for names/addresses (needs presidio-analyzer + spaCy model)
+    retention_days_messages: int = 90  # delete conversation messages after N days
+    retention_days_pii: int = 30  # delete vault entries after N days (placeholders become [EMAIL])
+    shopify_webhook_secret: SecretStr | None = None  # app client secret: verifies GDPR webhooks
+
+    # ── Escalation (Part 3) ───────────────────────────────────────────────────
+    meta_app_id: str = ""  # our app id: lets us recognise thread control coming back to us
+    meta_handover: bool = False  # pass Messenger/IG threads to the Page/IG inbox on hand-off
+    helpdesk: Literal["none", "webhook", "zendesk"] = "none"
+    helpdesk_webhook_url: str = ""
+    helpdesk_webhook_secret: SecretStr = SecretStr("")
+    zendesk_subdomain: str = ""
+    zendesk_email: str = ""
+    zendesk_api_token: SecretStr = SecretStr("")
+    agent_api_key: SecretStr = SecretStr("")  # X-Agent-Key for the human-agent API
+    human_auto_release_hours: int = 48  # give idle hand-offs back to the bot
 
     @property
     def ig_token(self) -> SecretStr:

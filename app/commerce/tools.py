@@ -30,6 +30,9 @@ class ToolContext:
     msg: InboundMessage
     conversation_id: str
     state: dict[str, Any] = field(default_factory=dict)  # persisted per conversation
+    # Side-channel for tools that change control flow (escalate, start a flow). The
+    # orchestrator acts on these after the LLM turn, so a tool never sends messages itself.
+    signals: dict[str, Any] = field(default_factory=dict)
 
 
 Handler = Callable[[ToolContext, dict[str, Any]], Awaitable[dict[str, Any]]]

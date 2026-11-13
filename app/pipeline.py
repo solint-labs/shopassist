@@ -53,7 +53,8 @@ class MessagePipeline:
         if not self.dedupe.add_if_new(f"{msg.channel}:{msg.message_id}"):
             log.info("pipeline.duplicate", message_id=msg.message_id)
             return None
-        await self.gateway.acknowledge(msg)
+        if await self.agent.is_bot_handling(msg):
+            await self.gateway.acknowledge(msg)  # no typing bubble while a human owns the thread
         try:
             reply = await self.agent.respond(msg)
         except Exception as e:  # noqa: BLE001 - the customer must always get *something*
@@ -62,5 +63,6 @@ class MessagePipeline:
                 return None  # never post an error message publicly
             reply = AgentReply(text=f"{FALLBACK_TEXT} ({self.agent.tenant.brand.support_email})",
                                meta={"fallback": True})
-        await self.gateway.deliver(msg, reply)
+        if reply is not None:  # None = a human owns this conversation; stay silent
+            await self.gateway.deliver(msg, reply)
         return reply

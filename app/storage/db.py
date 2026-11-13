@@ -28,6 +28,7 @@ class Database:
 
     async def create_all(self) -> None:
         """Create tables if missing. Fine for dev; use Alembic migrations in prod."""
+        from app.privacy import vault  # noqa: F401  (pii_tokens table)
         from app.storage import models  # noqa: F401  (register models on Base.metadata)
 
         async with self.engine.begin() as conn:

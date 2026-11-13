@@ -32,9 +32,11 @@ class Conversation(Base):
     channel: Mapped[str] = mapped_column(String(16))
     kind: Mapped[str] = mapped_column(String(16))
     user_id: Mapped[str] = mapped_column(String(128))
+    business_id: Mapped[str] = mapped_column(String(64), default="")  # phone_number_id / page id / IG id
     user_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    # "bot" while the agent is handling it; later parts add "human" and "closed".
-    status: Mapped[str] = mapped_column(String(16), default="bot")
+    # "bot" while the agent is handling it, "human" after a hand-off (the bot stays silent).
+    status: Mapped[str] = mapped_column(String(16), default="bot", index=True)
+    last_inbound_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     meta: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
@@ -55,3 +57,18 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
+
+
+class Handoff(Base):
+    """A hand-off to a human: why, how urgent, and where the ticket lives."""
+
+    __tablename__ = "handoffs"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+    reason: Mapped[str] = mapped_column(String(64))
+    priority: Mapped[str] = mapped_column(String(16))  # low | normal | high | urgent
+    summary: Mapped[str] = mapped_column(Text)  # pseudonymised summary for the human agent
+    external_ticket_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

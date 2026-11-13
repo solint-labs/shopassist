@@ -1,6 +1,6 @@
 [project]
 name = "shopassist"
-version = "0.2.0"
+version = "0.3.0"
 description = "ShopAssist: a production-grade LLM virtual agent for e-commerce customer support (Shopify + WhatsApp/Messenger/Instagram)."
 readme = "README.md"
 requires-python = ">=3.11"

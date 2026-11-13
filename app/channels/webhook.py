@@ -14,7 +14,7 @@ import json
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response
 
-from app.channels.parser import parse_webhook
+from app.channels.parser import parse_handover_events, parse_webhook
 from app.channels.signature import verify_meta_signature
 from app.logging_config import log
 
@@ -38,7 +38,9 @@ async def verify_subscription(
 async def receive(request: Request, background: BackgroundTasks) -> dict:
     settings = request.app.state.settings
     body = await request.body()  # raw bytes: the signature is over these exact bytes
-    secrets = [settings.meta_app_secret.get_secret_value()]
+    # Instagram API with Instagram Login signs with the Instagram app secret.
+    secrets = [settings.meta_app_secret.get_secret_value(),
+               settings.instagram_app_secret.get_secret_value() if settings.instagram_app_secret else ""]
     if not verify_meta_signature(body, request.headers.get("x-hub-signature-256"), secrets):
         log.warning("webhook.bad_signature")
         raise HTTPException(status_code=401, detail="invalid signature")
@@ -47,6 +49,13 @@ async def receive(request: Request, background: BackgroundTasks) -> dict:
         payload = json.loads(body)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="invalid json") from None
+
+    # Handover protocol: thread control came back to our app -> the bot resumes.
+    for ev in parse_handover_events(payload):
+        if settings.meta_app_id and ev.new_owner_app_id == settings.meta_app_id:
+            conv = await request.app.state.agent.store.find_by_key(f"{ev.channel}:{ev.business_id}:d:{ev.user_id}")
+            if conv:
+                background.add_task(request.app.state.handoff.release, conv.id)
 
     messages = parse_webhook(payload)
     pipeline = request.app.state.pipeline
