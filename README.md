@@ -37,6 +37,20 @@ Meta webhook ──► verify signature ──► parse to InboundMessage ──
 - `app/agent/`: tenant/persona config, sectioned system prompt, DB-backed memory, the turn orchestrator
 - Instagram comments: a structured triage call decides between a public reply and a private reply (DM)
 
+## Part 2: what's added
+
+```
+history ─► condense follow-up ─► hybrid search (BGE dense + BM25 sparse, RRF in Qdrant)
+        ─► cross-encoder rerank ─► relevance threshold ─► numbered <sources> in prompt
+        ─► LLM ⇄ tools (get_order_status, search_products via Shopify GraphQL)
+        ─► validate + strip citations ─► append policy link
+```
+
+- `app/rag/`: heading-aware chunking, fastembed encoders, Qdrant hybrid store, retriever with threshold, grounding
+- `app/commerce/`: Shopify client (client-credentials auth, throttling) and tools with identity checks in code
+- `knowledge/brewline/`: the sample help center; `scripts/ingest.py` indexes it plus Shopify policies, pages and products
+- Setup: [docs/shopify-setup.md](docs/shopify-setup.md)
+
 ## Quick start
 
 ```bash

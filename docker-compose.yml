@@ -1,15 +1,20 @@
-# Local / single-host deployment for Part 1.
-#   cp .env.example .env   # fill in LLM + Meta credentials
+# Single-host deployment (Part 2): API + Postgres + Qdrant.
+#   cp .env.example .env   # fill in LLM, Meta and Shopify credentials
 #   docker compose up --build
+#   docker compose exec api python -m scripts.ingest --shopify
 services:
   api:
     build: .
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://shopassist:shopassist@postgres:5432/shopassist
+      QDRANT_URL: http://qdrant:6333
+      RAG_MODEL_CACHE: /models
+    volumes: [models:/models]   # fastembed downloads models once and reuses them
     ports: ["8000:8000"]
     depends_on:
       postgres: { condition: service_healthy }
+      qdrant: { condition: service_started }
     restart: unless-stopped
 
   postgres:
@@ -24,5 +29,12 @@ services:
       interval: 5s
       retries: 10
 
+  qdrant:
+    image: qdrant/qdrant:latest
+    volumes: [qdrant:/qdrant/storage]
+    ports: ["6333:6333"]
+
 volumes:
   pgdata:
+  qdrant:
+  models:

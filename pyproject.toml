@@ -1,6 +1,6 @@
 [project]
 name = "shopassist"
-version = "0.1.0"
+version = "0.2.0"
 description = "ShopAssist: a production-grade LLM virtual agent for e-commerce customer support (Shopify + WhatsApp/Messenger/Instagram)."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,6 +18,8 @@ dependencies = [
   "anthropic>=0.40",
   "pyyaml>=6.0",
   "structlog>=24.1",
+  "qdrant-client>=1.12",
+  "fastembed>=0.4",
 ]
 
 [project.optional-dependencies]
@@ -31,7 +33,7 @@ dev = [
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-filterwarnings = ["ignore::DeprecationWarning"]
+filterwarnings = ["ignore::DeprecationWarning", "ignore:Payload indexes have no effect"]
 
 [build-system]
 requires = ["setuptools>=68"]

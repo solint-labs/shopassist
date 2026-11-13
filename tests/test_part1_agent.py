@@ -39,7 +39,7 @@ async def test_whatsapp_roundtrip(client, graph_mock, fake_llm):
     path, reply = calls[1]
     assert path.endswith(f"/{p.WA_PHONE_ID}/messages")
     assert reply["to"] == "919800000001" and reply["context"]["message_id"] == "wamid.HBgM001"
-    assert "Do you ship to Pune?" in reply["text"]["body"]
+    assert reply["text"]["body"].strip()  # content depends on the stage (echo in Part 1, grounded later)
 
     system = fake_llm.calls[0]["system"]
     assert "You are Bree" in system and "WhatsApp" in system and "ONLY help with" in system

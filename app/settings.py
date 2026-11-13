@@ -72,6 +72,35 @@ class Settings(BaseSettings):
     # Conversation memory: how many past turns the LLM sees.
     history_turns: int = Field(default=12, ge=2, le=50)
 
+    # ── RAG (Part 2) ───────────────────────────────────────────────────────────
+    # Qdrant: QDRANT_URL for a server (prod), or QDRANT_PATH for embedded mode
+    # (":memory:" in tests, a directory for single-node deployments).
+    qdrant_url: str | None = None
+    qdrant_api_key: SecretStr | None = None
+    qdrant_path: str = "./data/qdrant"
+    knowledge_dir: str = "knowledge/brewline"
+    # "fastembed" = open-source ONNX models on CPU (prod). "hashing" = deterministic, offline (tests).
+    rag_encoders: Literal["fastembed", "hashing"] = "fastembed"
+    rag_dense_model: str = "BAAI/bge-small-en-v1.5"
+    rag_sparse_model: str = "Qdrant/bm25"
+    rag_reranker_model: str = "BAAI/bge-reranker-base"
+    rag_model_cache: str | None = None
+    rag_top_k: int = 20  # candidates from hybrid search
+    rag_top_n: int = 4  # passages that go into the prompt
+    rag_min_score: float = 0.3  # reranker relevance threshold (0..1); calibrate with evals
+    rag_condense_query: bool = True
+    rag_append_source_link: bool = True
+    rag_ingest_on_startup: bool = False  # index knowledge_dir at boot (handy for demos)
+
+    # ── Shopify (Part 2) ──────────────────────────────────────────────────────
+    shopify_shop: str = ""  # "brewline" or "brewline.myshopify.com"
+    shopify_api_version: str = "2026-10"
+    shopify_access_token: SecretStr | None = None  # legacy custom app token (shpat_...)
+    shopify_client_id: str | None = None  # Dev Dashboard app -> client credentials grant
+    shopify_client_secret: SecretStr | None = None
+
+    max_tool_rounds: int = 4  # safety cap on LLM <-> tool iterations per turn
+
     @property
     def ig_token(self) -> SecretStr:
         return self.instagram_access_token or self.page_access_token

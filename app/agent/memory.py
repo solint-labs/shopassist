@@ -41,6 +41,18 @@ class ConversationStore:
                 conv.updated_at = m.created_at  # touch for "recent conversations" queries
             return m
 
+    async def get_state(self, conversation_id: str) -> dict:
+        """Per-conversation working state (verified orders, flow progress...)."""
+        async with self.db.session() as s:
+            conv = await s.get(Conversation, conversation_id)
+            return dict((conv.meta or {}).get("state", {})) if conv else {}
+
+    async def save_state(self, conversation_id: str, state: dict) -> None:
+        async with self.db.session() as s:
+            conv = await s.get(Conversation, conversation_id)
+            if conv is not None:
+                conv.meta = {**(conv.meta or {}), "state": state}  # reassign so SQLAlchemy sees the change
+
     async def history(self, conversation_id: str, limit: int) -> list[ChatMessage]:
         """Most recent `limit` turns, oldest first, mapped to LLM roles."""
         async with self.db.session() as s:

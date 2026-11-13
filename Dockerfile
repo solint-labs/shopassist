@@ -11,12 +11,13 @@ RUN pip install .
 # ── Runtime stage: small image, non-root user ─────────────────────────────────
 FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PATH="/venv/bin:$PATH"
-RUN useradd --create-home --uid 10001 shopassist
+RUN useradd --create-home --uid 10001 shopassist && mkdir -p /models /app/data && chown shopassist /models /app/data
 COPY --from=build /venv /venv
 WORKDIR /app
 COPY app ./app
 COPY config ./config
 COPY scripts ./scripts
+COPY knowledge ./knowledge
 USER shopassist
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
