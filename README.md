@@ -14,7 +14,7 @@ This is the companion code to a four-part article series. Each part has its own 
 | `part-4` | Production: scale, enterprise, persona    | Queue workers, multi-tenant, RBAC/audit, per-customer tone, evals            |
 
 ```bash
-git checkout part-1   # then follow the README at that tag
+git checkout part-1   # then follow the README on that branch
 ```
 
 The running example is **Brewline Coffee Co.**, a fictional specialty-coffee store

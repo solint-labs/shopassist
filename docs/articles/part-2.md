@@ -4,7 +4,7 @@
 
 > **Series:** Part 1: Foundations · **Part 2: Grounded answers (RAG + Shopify)** · Part 3: Trust (escalation, flows, privacy) · Part 4: Production (scale, enterprise, personality)
 >
-> **Code:** [github.com/solint-labs/shopassist](https://github.com/solint-labs/shopassist), `git checkout part-2`
+> **Code:** [github.com/solint-labs/shopassist](https://github.com/solint-labs/shopassist), branch `part-2` (`git checkout part-2`)
 
 At the end of Part 1, Bree could hold a pleasant conversation on three channels. She also answered policy questions from the model's general knowledge, which is how support bots end up promising refunds the store doesn't offer.
 

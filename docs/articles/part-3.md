@@ -4,7 +4,7 @@
 
 > **Series:** Part 1: Foundations · Part 2: Grounded answers (RAG + Shopify) · **Part 3: Trust (escalation, flows, privacy)** · Part 4: Production (scale, enterprise, personality)
 >
-> **Code:** [github.com/solint-labs/shopassist](https://github.com/solint-labs/shopassist), `git checkout part-3`
+> **Code:** [github.com/solint-labs/shopassist](https://github.com/solint-labs/shopassist), branch `part-3` (`git checkout part-3`)
 
 Customers and support leads don't judge a support bot on its best answers. They judge it on its worst moments: the angry customer who had to ask three times for a human, the cancellation the bot "confirmed" but never performed, the phone number pasted into a public comment that stayed visible for a day.
 

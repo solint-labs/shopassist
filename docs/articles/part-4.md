@@ -4,7 +4,7 @@
 
 > **Series:** Part 1: Foundations · Part 2: Grounded answers (RAG + Shopify) · Part 3: Trust (escalation, flows, privacy) · **Part 4: Production (scale, enterprise, personality)**
 >
-> **Code:** [github.com/solint-labs/shopassist](https://github.com/solint-labs/shopassist), `git checkout part-4` (also `main`)
+> **Code:** [github.com/solint-labs/shopassist](https://github.com/solint-labs/shopassist), branch `part-4` (same as `main`)
 
 Parts 1-3 built an agent that does the right thing. This part makes sure it *keeps* doing the right thing at volume, through provider outages and deploys, for many stores at once, under the controls an enterprise security review will ask about, and in a voice each customer actually wants.
 
