@@ -1,0 +1,28 @@
+# Local / single-host deployment for Part 1.
+#   cp .env.example .env   # fill in LLM + Meta credentials
+#   docker compose up --build
+services:
+  api:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://shopassist:shopassist@postgres:5432/shopassist
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: shopassist
+      POSTGRES_PASSWORD: shopassist
+      POSTGRES_DB: shopassist
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shopassist"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  pgdata:
