@@ -3,10 +3,10 @@
 An LLM-powered customer-support agent for a Shopify store. It answers on **WhatsApp**,
 **Facebook Messenger** and **Instagram**, including DMs and public comments.
 
-This is the companion code to a four-part article series. Each part is a git tag, so you
-can check out the code exactly as it stood at the end of that article:
+This is the companion code to a four-part article series. Each part has its own branch
+(`part-1` to `part-4`; `main` matches `part-4`), so you can check out the code exactly as it stood at the end of that article:
 
-| Tag      | Article                                   | What the agent can do                                                        |
+| Branch   | Article                                   | What the agent can do                                                        |
 |----------|-------------------------------------------|------------------------------------------------------------------------------|
 | `part-1` | Foundations: one brain, three channels    | Talk on WhatsApp, Messenger and IG (DMs + comments), with persona and memory |
 | `part-2` | Grounded answers: RAG + Shopify           | Answer from the store's knowledge base and look up live orders and products  |

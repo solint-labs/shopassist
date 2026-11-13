@@ -24,8 +24,8 @@ pip install -e ".[dev]"
 cp .env.example .env
 ```
 
-Every stage of the article series is a tag. To work on a specific part, run `git checkout part-2`
-(or another tag). Each tag has its own README and passing tests.
+Every stage of the article series has its own branch (`part-1` to `part-4`). To work on a specific part, run `git checkout part-2`
+(or another part). Each branch has its own README and passing tests.
 
 ## 3. Run the tests and evals (no keys needed)
 

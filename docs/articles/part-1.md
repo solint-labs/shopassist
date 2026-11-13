@@ -4,7 +4,7 @@
 
 > **Series:** **Part 1: Foundations** · Part 2: Grounded answers (RAG + Shopify) · Part 3: Trust (escalation, flows, privacy) · Part 4: Production (scale, enterprise, personality)
 >
-> **Code:** [github.com/solint-labs/shopassist](https://github.com/solint-labs/shopassist). Every part has a git tag; run `git checkout part-1` to get the code exactly as this article describes it.
+> **Code:** [github.com/solint-labs/shopassist](https://github.com/solint-labs/shopassist). Every part has its own branch; run `git checkout part-1` to get the code exactly as this article describes it.
 
 Most "build a support chatbot with an LLM" tutorials stop at a prompt and an API call. That's about 10% of the work. The other 90% decides whether the bot gets switched off in week three. It has to answer only what it actually knows, hand off to a human before the customer gets angry, keep personal data out of places it shouldn't be, and survive the day your LLM provider has an outage.
 
