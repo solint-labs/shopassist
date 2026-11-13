@@ -28,6 +28,8 @@ class Database:
 
     async def create_all(self) -> None:
         """Create tables if missing. Fine for dev; use Alembic migrations in prod."""
+        from app.enterprise import rbac  # noqa: F401  (api_keys, audit_log)
+        from app.personalization import profiles  # noqa: F401  (customer_profiles)
         from app.privacy import vault  # noqa: F401  (pii_tokens table)
         from app.storage import models  # noqa: F401  (register models on Base.metadata)
 

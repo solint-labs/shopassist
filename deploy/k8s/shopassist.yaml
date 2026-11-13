@@ -1,0 +1,109 @@
+# ShopAssist on Kubernetes (Part 4). Minimal but production-shaped:
+#   - api: stateless, HPA on CPU, readiness on /readyz, liveness on /healthz
+#   - worker: scales on Redis Stream backlog via KEDA
+#   - retention: daily CronJob (retention windows, idle hand-off release)
+# Postgres, Redis and Qdrant are expected as managed services or their own charts.
+# Secrets come from a Secret (or External Secrets / Vault); tenant YAML from a ConfigMap.
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: shopassist-env }
+data:
+  ENV: prod
+  LOG_JSON: "true"
+  QUEUE_MODE: redis
+  TENANTS_DIR: /config/tenants
+  KNOWLEDGE_ROOT: /app/knowledge
+  RAG_MODEL_CACHE: /models
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: shopassist-api }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: shopassist-api } }
+  template:
+    metadata:
+      labels: { app: shopassist-api }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/path: /metrics, prometheus.io/port: "8000" }
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/your-org/shopassist:1.0.0
+          ports: [{ containerPort: 8000 }]
+          envFrom: [{ configMapRef: { name: shopassist-env } }, { secretRef: { name: shopassist-secrets } }]
+          readinessProbe: { httpGet: { path: /readyz, port: 8000 }, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /healthz, port: 8000 }, periodSeconds: 20 }
+          resources: { requests: { cpu: 250m, memory: 512Mi }, limits: { memory: 1Gi } }
+          volumeMounts: [{ name: tenants, mountPath: /config/tenants }, { name: models, mountPath: /models }]
+      volumes:
+        - { name: tenants, configMap: { name: shopassist-tenants } }
+        - { name: models, emptyDir: {} }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: shopassist-api }
+spec: { selector: { app: shopassist-api }, ports: [{ port: 80, targetPort: 8000 }] }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: shopassist-api }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: shopassist-api }
+  minReplicas: 2
+  maxReplicas: 10
+  metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 70 } } }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: shopassist-worker }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: shopassist-worker } }
+  template:
+    metadata:
+      labels: { app: shopassist-worker }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/path: /metrics, prometheus.io/port: "9100" }
+    spec:
+      terminationGracePeriodSeconds: 60   # let in-flight turns finish on SIGTERM
+      containers:
+        - name: worker
+          image: ghcr.io/your-org/shopassist:1.0.0
+          command: ["python", "-m", "app.worker"]
+          envFrom: [{ configMapRef: { name: shopassist-env } }, { secretRef: { name: shopassist-secrets } }]
+          resources: { requests: { cpu: 500m, memory: 1Gi }, limits: { memory: 2Gi } }  # rerankers are CPU-bound
+          volumeMounts: [{ name: tenants, mountPath: /config/tenants }, { name: models, mountPath: /models }]
+      volumes:
+        - { name: tenants, configMap: { name: shopassist-tenants } }
+        - { name: models, emptyDir: {} }
+---
+# Scale workers on queue backlog (requires KEDA).
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata: { name: shopassist-worker }
+spec:
+  scaleTargetRef: { name: shopassist-worker }
+  minReplicaCount: 2
+  maxReplicaCount: 30
+  triggers:
+    - type: redis-streams
+      metadata:
+        addressFromEnv: REDIS_ADDRESS        # host:port, e.g. from the secret
+        stream: shopassist:inbound
+        consumerGroup: workers
+        pendingEntriesCount: "20"            # target backlog per replica
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: shopassist-retention }
+spec:
+  schedule: "17 2 * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: retention
+              image: ghcr.io/your-org/shopassist:1.0.0
+              command: ["python", "-m", "scripts.retention", "--release-idle"]
+              envFrom: [{ configMapRef: { name: shopassist-env } }, { secretRef: { name: shopassist-secrets } }]

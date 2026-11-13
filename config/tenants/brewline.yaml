@@ -70,3 +70,35 @@ returns:
 
 cancellation:
   allowed_fulfillment_statuses: [UNFULFILLED]   # i.e. not roasted/shipped yet
+
+# ── Part 4: personalisation ──────────────────────────────────────────────────
+personalization:
+  channel_overrides:
+    instagram: { emoji: expressive }          # IG audiences expect a livelier tone
+    whatsapp:  { verbosity: brief }
+  variants:                                   # A/B test two voices; sticky per customer
+    - name: concise
+      weight: 1
+      overrides: { verbosity: brief, emoji: none }
+    - name: warm
+      weight: 1
+      overrides: { verbosity: balanced }
+  examples:
+    - customer: "is the ethiopia one good for french press?"
+      reply: "Oh, it's lovely in a French press! Go coarse on the grind and steep 4 minutes. You'll get loads of berry sweetness ☕"
+    - customer: "my order is late, this is annoying"
+      reply: "I'm sorry, waiting on coffee is the worst. Let me check where it is right now. What's your order number?"
+  vip_instructions: "This is a Brewline Club (VIP) member: be extra attentive and offer a human teammate sooner."
+
+# Multi-tenant deployments (TENANTS_DIR) also set which Meta assets and secrets belong
+# to this store. Secrets are references, never values:
+# channels:
+#   whatsapp_phone_number_id: "109876543210"
+#   page_id: "222333444"
+#   instagram_account_id: "17841400000000000"
+# secrets:
+#   whatsapp_token: env:BREWLINE_WHATSAPP_TOKEN
+#   page_access_token: file:/run/secrets/brewline_page_token
+# shopify:
+#   shop: brewline
+#   client_id: "..."

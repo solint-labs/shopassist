@@ -37,6 +37,64 @@ class Persona(BaseModel):
     avoid_phrases: list[str] = Field(default_factory=list)  # e.g. "As an AI language model"
 
 
+class PersonaOverride(BaseModel):
+    """Partial persona: only the fields set here override the base persona (Part 4)."""
+
+    voice: str | None = None
+    formality: Literal["casual", "neutral", "formal"] | None = None
+    emoji: Literal["none", "light", "expressive"] | None = None
+    verbosity: Literal["brief", "balanced", "detailed"] | None = None
+    language: str | None = None
+    signature_phrases: list[str] | None = None
+
+
+class PersonaVariant(BaseModel):
+    """A/B test a voice: customers are assigned deterministically by hash, weighted."""
+
+    name: str
+    weight: float = 1.0
+    overrides: PersonaOverride = PersonaOverride()
+
+
+class StyleExample(BaseModel):
+    """Few-shot examples of the brand voice. 2-4 good examples beat a page of adjectives."""
+
+    customer: str
+    reply: str
+
+
+class Personalization(BaseModel):
+    channel_overrides: dict[str, PersonaOverride] = Field(default_factory=dict)  # keyed by channel name
+    variants: list[PersonaVariant] = Field(default_factory=list)
+    examples: list[StyleExample] = Field(default_factory=list)
+    vip_instructions: str = "This is a VIP customer: be especially attentive and offer to escalate sooner."
+
+
+class TenantChannels(BaseModel):
+    """Which Meta assets belong to this tenant (Part 4 multi-tenancy). Routing key for webhooks."""
+
+    whatsapp_phone_number_id: str | None = None
+    page_id: str | None = None
+    instagram_account_id: str | None = None
+    instagram_messaging_node: str | None = None  # IG id for Instagram Login; page id otherwise
+
+
+class TenantSecrets(BaseModel):
+    """References, never values: "env:NAME" or "file:/run/secrets/name" (Kubernetes/Docker secrets)."""
+
+    whatsapp_token: str | None = None
+    page_access_token: str | None = None
+    instagram_access_token: str | None = None
+    shopify_access_token: str | None = None
+    shopify_client_secret: str | None = None
+
+
+class TenantShopify(BaseModel):
+    shop: str
+    client_id: str | None = None
+    api_version: str = "2026-10"
+
+
 class Scope(BaseModel):
     allowed_topics: list[str]
     refuse_message: str = "I can only help with questions about our store, products and orders."
@@ -103,6 +161,12 @@ class TenantConfig(BaseModel):
     escalation: EscalationConfig = EscalationConfig()
     returns: ReturnsPolicy = ReturnsPolicy()
     cancellation: CancellationPolicy = CancellationPolicy()
+    # Part 4: personalisation and multi-tenancy. All optional: without `channels`/`secrets`
+    # the tenant uses the global settings (single-store mode, as in Parts 1-3).
+    personalization: Personalization = Personalization()
+    channels: TenantChannels = TenantChannels()
+    secrets: TenantSecrets = TenantSecrets()
+    shopify: TenantShopify | None = None
 
 
 def load_tenant_config(path: str | Path) -> TenantConfig:

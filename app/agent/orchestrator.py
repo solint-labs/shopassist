@@ -16,6 +16,11 @@ Part 3: + privacy, escalation and deterministic flows. A turn now looks like thi
 
 Instagram comments: moderation (hide spam/abuse, hide comments that expose PII), then
 the grounded public-reply / move-to-DM triage from Parts 1-2.
+
+Part 4: per-customer personalisation. Before the turn, explicit style requests ("reply in
+Hindi", "no emojis") update the customer's profile; the persona is resolved as
+tenant -> channel -> A/B variant -> customer; after the turn, StyleGuard enforces it.
+VIP customers get priority on hand-off.
 """
 
 from __future__ import annotations
@@ -36,6 +41,8 @@ from app.flows.engine import FlowContext, FlowEngine
 from app.flows.tools import FLOW_GUIDANCE
 from app.llm.base import ChatMessage, LLMClient
 from app.logging_config import log
+from app.personalization.persona import StyleGuard, resolve_persona
+from app.personalization.profiles import CustomerProfile, ProfileStore, customer_key, detect_preferences
 from app.privacy.vault import TOKEN_RE, PIIVault, RedactionResult
 from app.rag.grounding import finalize_answer, knowledge_section
 from app.rag.retriever import Retrieval, Retriever
@@ -52,7 +59,8 @@ class Agent:
                  retriever: Retriever | None = None, tools: ToolRegistry | None = None,
                  max_tool_rounds: int = 4, append_source_link: bool = True,
                  vault: PIIVault | None = None, handoff: HandoffService | None = None,
-                 flows: FlowEngine | None = None, shopify: ShopifyClient | None = None):
+                 flows: FlowEngine | None = None, shopify: ShopifyClient | None = None,
+                 profiles: ProfileStore | None = None):
         self.llm = llm
         self.store = store
         self.tenant = tenant
@@ -66,6 +74,8 @@ class Agent:
         self.flows = flows or FlowEngine([])
         self.shopify = shopify
         self.detector = EscalationDetector(tenant.escalation)
+        self.profiles = profiles
+        self.style_guard = StyleGuard()
 
     async def is_bot_handling(self, msg: InboundMessage) -> bool:
         conv = await self.store.find_by_key(msg.conversation_key)
@@ -88,7 +98,10 @@ class Agent:
         if msg.kind == MessageKind.COMMENT:
             reply = await self._respond_to_comment(msg, red)
         else:
-            reply = await self._respond_to_dm(conv.id, msg, red)
+            persona, variant, profile = await self._personalize(msg, red.text)
+            reply = await self._respond_to_dm(conv.id, msg, red, persona, profile)
+            reply.text, fixes = self.style_guard.apply(reply.text, persona)
+            reply.meta.update({"variant": variant, "style_fixes": fixes} if variant or fixes else {})
             if red.blocked:
                 reply.text = f"{BLOCKED_NOTE}\n\n{reply.text}"
 
@@ -109,6 +122,18 @@ class Agent:
             reply.private_text = await self.vault.rehydrate(conv.id, reply.private_text)
         return reply
 
+    # ── Personalisation ──────────────────────────────────────────────────────
+
+    async def _personalize(self, msg: InboundMessage, text: str):
+        profile: CustomerProfile | None = None
+        key = customer_key(msg)
+        if self.profiles:
+            prefs = detect_preferences(text)
+            profile = await (self.profiles.update(self.tenant.tenant_id, key, **prefs) if prefs
+                             else self.profiles.get(self.tenant.tenant_id, key))
+        persona, variant = resolve_persona(self.tenant, str(msg.channel), key, profile)
+        return persona, variant, profile
+
     # ── Privacy ──────────────────────────────────────────────────────────────
 
     async def _pseudonymize(self, conversation_id: str, text: str) -> RedactionResult:
@@ -126,32 +151,37 @@ class Agent:
 
     # ── Direct messages ──────────────────────────────────────────────────────
 
-    def _flow_ctx(self, conversation_id: str, msg: InboundMessage, state: dict) -> FlowContext:
+    def _flow_ctx(self, conversation_id: str, msg: InboundMessage, state: dict, vip: bool = False) -> FlowContext:
         async def escalate(decision: EscalationDecision) -> AgentReply:
-            return await self._escalate(conversation_id, msg, decision)
+            return await self._escalate(conversation_id, msg, decision, vip)
 
         async def forget() -> None:
             await self.store.delete(conversation_id)
 
         return FlowContext(msg, conversation_id, state, self.tenant, self.shopify, escalate, forget)
 
-    async def _escalate(self, conversation_id: str, msg: InboundMessage, decision: EscalationDecision) -> AgentReply:
+    async def _escalate(self, conversation_id: str, msg: InboundMessage, decision: EscalationDecision,
+                        vip: bool = False) -> AgentReply:
+        if vip and decision.priority in ("low", "normal"):  # VIPs jump the queue
+            decision = EscalationDecision(decision.reason, "high", f"VIP; {decision.detail}")
         if self.handoff is None:  # no hand-off configured: at least tell the customer where to go
             return AgentReply(f"I'd like a teammate to help with this. Please email {self.tenant.brand.support_email}.",
                               meta={"escalated": decision.reason, "priority": decision.priority})
         return await self.handoff.escalate(conversation_id, msg, decision)
 
-    async def _respond_to_dm(self, conversation_id: str, msg: InboundMessage, red: RedactionResult) -> AgentReply:
+    async def _respond_to_dm(self, conversation_id: str, msg: InboundMessage, red: RedactionResult,
+                             persona=None, profile: CustomerProfile | None = None) -> AgentReply:
         history = await self.store.history(conversation_id, self.history_turns)
         state = await self.store.get_state(conversation_id)
         previous_user = [m.content for m in history[:-1] if m.role == "user"]
-        ctx = self._flow_ctx(conversation_id, msg, state)
+        vip = bool(profile and profile.vip)
+        ctx = self._flow_ctx(conversation_id, msg, state, vip)
 
         # 3. deterministic escalation rules
         decision = self.detector.evaluate(red.text, previous_user, state)
         if decision:
             state.pop("flow", None)
-            reply = await self._escalate(conversation_id, msg, decision)
+            reply = await self._escalate(conversation_id, msg, decision, vip)
             state["failed_answers"] = 0
             await self.store.save_state(conversation_id, state)
             return reply
@@ -175,13 +205,18 @@ class Agent:
             sections.append(knowledge_section(retrieval))
         if self.tools:
             sections += [TOOLS_GUIDANCE, FLOW_GUIDANCE]
-        system = build_system_prompt(self.tenant, msg.channel, msg.kind, extra_sections=sections)
+        if profile and (profile.vip or profile.notes):
+            notes = [self.tenant.personalization.vip_instructions] if profile.vip else []
+            notes += [f"Customer notes: {profile.notes}"] if profile.notes else []
+            sections.append("\n".join(notes))
+        system = build_system_prompt(self.tenant, msg.channel, msg.kind, extra_sections=sections, persona=persona)
         tctx = ToolContext(msg, conversation_id, state)
         text, tools_used, usage = await self._run_with_tools(system, history, tctx)
 
         if "escalate" in tctx.signals:
             reason, urgency = tctx.signals["escalate"]
-            reply = await self._escalate(conversation_id, msg, EscalationDecision(reason, urgency, "requested by model"))
+            reply = await self._escalate(conversation_id, msg, EscalationDecision(reason, urgency, "requested by model"),
+                                         vip)
         elif "start_flow" in tctx.signals:
             name, args = tctx.signals["start_flow"]
             reply = await self.flows.start(name, ctx, args)

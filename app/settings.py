@@ -124,6 +124,23 @@ class Settings(BaseSettings):
     agent_api_key: SecretStr = SecretStr("")  # X-Agent-Key for the human-agent API
     human_auto_release_hours: int = 48  # give idle hand-offs back to the bot
 
+    # ── Scale & reliability (Part 4) ──────────────────────────────────────────
+    redis_url: str | None = None  # redis://redis:6379/0 - dedupe, locks, queue
+    # inline = process in the API process (dev). redis = enqueue to Redis Streams; run `python -m app.worker`.
+    queue_mode: Literal["inline", "redis"] = "inline"
+    worker_concurrency: int = 8
+    worker_max_deliveries: int = 5  # then the message goes to the dead-letter stream
+    # Fallback LLMs, tried in order when the primary fails or its circuit is open. JSON list, e.g.
+    # [{"provider":"openai","model":"my-model","base_url":"http://vllm:8000/v1","api_key_env":"VLLM_API_KEY"}]
+    llm_fallbacks: str = "[]"
+    llm_breaker_threshold: int = 5
+    llm_breaker_cooldown_s: float = 30.0
+
+    # ── Enterprise (Part 4) ───────────────────────────────────────────────────
+    tenants_dir: str | None = None  # load every *.yaml here (multi-tenant); else TENANT_CONFIG_PATH
+    knowledge_root: str | None = None  # knowledge/<tenant_id>/ per tenant; else KNOWLEDGE_DIR
+    admin_bootstrap_key: SecretStr = SecretStr("")  # first admin key; create real keys, then remove it
+
     @property
     def ig_token(self) -> SecretStr:
         return self.instagram_access_token or self.page_access_token

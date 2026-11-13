@@ -69,6 +69,25 @@ inbound ─► pseudonymise PII (<EMAIL_1>, encrypted vault) ─► human owns t
 - Instagram moderation: hide spam/abuse and comments that expose personal data, then move to DM
 - `scripts/retention.py`: daily retention, key rotation, auto-release of idle hand-offs
 
+## Part 4: what's added
+
+```
+webhook ─► verify ─► resolve tenant ─► Redis Stream ─► worker: dedupe ─► conversation lock
+        ─► agent turn (LLM chain with retries, circuit breakers, failover) ─► deliver with retries
+        ─► metrics, audit
+persona = tenant ▸ channel override ▸ A/B variant ▸ customer profile  ─►  StyleGuard enforces it
+```
+
+- `app/reliability/`: Redis dedupe and locks, a Streams queue with reclaim and dead-letter, `ResilientLLM`
+- `app/tenancy/`: many stores per deployment; routing by Meta asset id; secrets as `env:`/`file:` references
+- `app/enterprise/`: API keys with roles (admin, supervisor, agent, analyst, auditor) and tenant scope,
+  an audit log, and admin/analytics APIs
+- `app/personalization/`: customer profiles (language, tone, length, emoji, VIP), A/B voice variants,
+  few-shot brand examples, StyleGuard
+- `app/observability/`: Prometheus metrics, `/readyz`
+- `evals/`: golden conversations and a runner (`python -m evals.run`). Use it as the CI gate.
+- `deploy/k8s/`, `docker-compose.yml` (api + workers + Redis + Postgres + Qdrant), [docs/operations.md](docs/operations.md)
+
 ## Quick start
 
 ```bash
@@ -86,9 +105,15 @@ To connect real channels, see [docs/meta-setup.md](docs/meta-setup.md).
 
 ## Deploy
 
-`docker compose up --build` runs the API with Postgres. The image is a slim, non-root,
-multi-stage build with a health check, so it runs as-is on any container platform. Put it
-behind HTTPS (Meta only calls HTTPS webhooks) and set `LOG_JSON=true` in production.
+`docker compose up --build` runs the full stack: API, workers, Postgres, Redis and Qdrant.
+For Kubernetes, see `deploy/k8s/shopassist.yaml` (HPA for the API, KEDA scaling for workers
+on queue backlog, a retention CronJob). The image is a slim, non-root, multi-stage build.
+Put it behind HTTPS (Meta only calls HTTPS webhooks). Operating guide: [docs/operations.md](docs/operations.md).
+
+```bash
+make test                               # 110+ tests, offline
+python -m evals.run                     # golden conversations against your real LLM
+```
 
 ## License
 

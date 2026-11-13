@@ -54,7 +54,8 @@ def voice_section(p: Persona) -> str:
     if p.language == "auto":
         lines.append("Reply in the same language the customer writes in.")
     else:
-        lines.append(f"Always reply in the language with ISO code '{p.language}'.")
+        name = LANGUAGE_NAMES.get(p.language, p.language)
+        lines.append(f"Always reply in {name}, even if the customer writes in another language.")
     if p.signature_phrases:
         lines.append(f"Brand phrases you may use occasionally (not every message): {', '.join(p.signature_phrases)}.")
     if p.avoid_phrases:
@@ -97,12 +98,31 @@ def channel_section(channel: Channel, kind: MessageKind) -> str:
     return CHANNEL_HINTS[channel]
 
 
+LANGUAGE_NAMES = {"en": "English", "hi": "Hindi", "hi-Latn": "Hinglish (Hindi in Latin script)", "ta": "Tamil",
+                  "te": "Telugu", "bn": "Bengali", "mr": "Marathi", "kn": "Kannada", "gu": "Gujarati",
+                  "ml": "Malayalam", "pa": "Punjabi", "ur": "Urdu", "es": "Spanish", "fr": "French", "de": "German",
+                  "ar": "Arabic", "pt": "Portuguese"}
+
+
+def examples_section(cfg: TenantConfig) -> str:
+    ex = cfg.personalization.examples
+    if not ex:
+        return ""
+    shots = "\n\n".join(f"Customer: {e.customer}\nYou: {e.reply}" for e in ex[:4])
+    return f"Examples of the brand voice (match the tone, not the content):\n{shots}"
+
+
 def build_system_prompt(cfg: TenantConfig, channel: Channel, kind: MessageKind = MessageKind.DIRECT,
-                        extra_sections: list[str] | None = None) -> str:
-    """Compose the full system prompt. `extra_sections` lets later parts inject context."""
+                        extra_sections: list[str] | None = None, persona: Persona | None = None) -> str:
+    """Compose the full system prompt.
+
+    `extra_sections` lets later parts inject context (knowledge, tools, customer notes);
+    `persona` is the resolved, per-customer persona from Part 4 (defaults to the tenant's).
+    """
     sections = [
         identity_section(cfg),
-        voice_section(cfg.persona),
+        voice_section(persona or cfg.persona),
+        examples_section(cfg),
         scope_section(cfg),
         facts_section(cfg),
         *(extra_sections or []),

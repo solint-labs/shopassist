@@ -1,40 +1,53 @@
-# Single-host deployment (Part 2): API + Postgres + Qdrant.
-#   cp .env.example .env   # fill in LLM, Meta and Shopify credentials
-#   docker compose up --build
+# Production-shaped single-host deployment (Part 4):
+#   api (webhooks, agent/admin APIs)  ->  Redis Stream  ->  worker(s) (agent turns)
+#   + Postgres, Qdrant, Redis
+#
+#   cp .env.example .env              # LLM, Meta, Shopify, PII keys
+#   docker compose up --build -d
+#   docker compose up -d --scale worker=4
 #   docker compose exec api python -m scripts.ingest --shopify
+x-app: &app
+  build: .
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+asyncpg://shopassist:shopassist@postgres:5432/shopassist
+    QDRANT_URL: http://qdrant:6333
+    REDIS_URL: redis://redis:6379/0
+    QUEUE_MODE: redis
+    RAG_MODEL_CACHE: /models
+    LOG_JSON: "true"
+  volumes: [models:/models]
+  depends_on:
+    postgres: { condition: service_healthy }
+    redis: { condition: service_healthy }
+    qdrant: { condition: service_started }
+  restart: unless-stopped
+
 services:
   api:
-    build: .
-    env_file: .env
-    environment:
-      DATABASE_URL: postgresql+asyncpg://shopassist:shopassist@postgres:5432/shopassist
-      QDRANT_URL: http://qdrant:6333
-      RAG_MODEL_CACHE: /models
-    volumes: [models:/models]   # fastembed downloads models once and reuses them
+    <<: *app
     ports: ["8000:8000"]
-    depends_on:
-      postgres: { condition: service_healthy }
-      qdrant: { condition: service_started }
-    restart: unless-stopped
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "app.worker"]
+    healthcheck: { disable: true }
+    deploy: { replicas: 2 }
 
   postgres:
     image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: shopassist
-      POSTGRES_PASSWORD: shopassist
-      POSTGRES_DB: shopassist
+    environment: { POSTGRES_USER: shopassist, POSTGRES_PASSWORD: shopassist, POSTGRES_DB: shopassist }
     volumes: [pgdata:/var/lib/postgresql/data]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U shopassist"]
-      interval: 5s
-      retries: 10
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U shopassist"], interval: 5s, retries: 10 }
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]   # AOF: queued messages survive restarts
+    volumes: [redisdata:/data]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, retries: 10 }
 
   qdrant:
     image: qdrant/qdrant:latest
     volumes: [qdrant:/qdrant/storage]
-    ports: ["6333:6333"]
 
-volumes:
-  pgdata:
-  qdrant:
-  models:
+volumes: { pgdata: {}, redisdata: {}, qdrant: {}, models: {} }

@@ -18,6 +18,7 @@ COPY app ./app
 COPY config ./config
 COPY scripts ./scripts
 COPY knowledge ./knowledge
+COPY evals ./evals
 USER shopassist
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
